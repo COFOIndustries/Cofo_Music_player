@@ -18,11 +18,20 @@ USER_DATA_PATH = "user_data.json"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 # Initialize global variables
-playlist = []
 current_song = None
 is_playing = False
-loop_song = False  # New variable for looping functionality
+loop_song = False
+loop_count = 0
 user_data = {}
+
+# ASCII art for COFO branding
+COFO_ASCII = r"""
+  ____    ____   ______   ______ 
+ |    \  /    | /  __  \ |      \
+ |  _  \/  _  ||  |  |  ||  ||  |
+ |  ||  ||  || ||  |  |  ||  ||  |
+ |__| \__|__|__||__|  |__||______|
+"""
 
 # Load and save user data
 def load_user_data():
@@ -33,9 +42,8 @@ def load_user_data():
     except FileNotFoundError:
         logging.warning("User data file not found, creating default settings.")
         user_data = {
-            "theme": "DarkAmber",
+            "theme": "White",
             "volume": 50,
-            "playlist": [],
             "cache": {}
         }
 
@@ -74,41 +82,57 @@ def download_song(video_url):
 
 # Play song with subprocess and handle looping
 def play_song(video_url, volume, offline=False):
-    global is_playing, loop_song
-    is_playing = True  # Playback is active
+    global is_playing, loop_song, loop_count
+    is_playing = True
 
     try:
-        while is_playing:  # Keep playing as long as the song is playing
+        while True:  # Keep looping if loop_song is enabled
+            logging.info(f"Starting playback: {video_url}")
             if offline:
                 file_path = download_song(video_url)
-                process = subprocess.Popen(['mpv', '--no-video', f'--volume={volume}', file_path])
+                if file_path:
+                    process = subprocess.Popen(['mpv', '--no-video', f'--volume={volume}', file_path])
             else:
                 process = subprocess.Popen(['mpv', '--no-video', f'--volume={volume}', video_url])
 
-            process.wait()  # Wait for song to complete
-            
-            if not loop_song:  # If loop is disabled, stop replaying
-                break
+            process.wait()  # Wait for the song to finish
+
+            # Check if looping is enabled
+            if not loop_song:
+                break  # Exit loop if looping is disabled
+
+            loop_count += 1
+            logging.info(f"Looped {loop_count} times")
+            window['loop_count'].update(f"Looped {loop_count} times")
 
     except Exception as e:
         logging.error(f"Error during playback: {str(e)}")
     finally:
-        is_playing = False  # Playback is no longer active when song or loop finishes
+        is_playing = False
+        logging.info("Playback finished or stopped.")
 
-# Play next song in playlist
-def play_next_song(auto_stream=False):
-    global playlist
-    if playlist:
-        next_song = playlist.pop(0)
-        user_data["playlist"] = playlist
-        save_user_data()
-        window.Element('playlist').update(user_data["playlist"])  # Refresh the playlist UI
+# Handle play button
+def handle_play(values):
+    global loop_count
+    song_name = values['song_input']
+    offline_mode = values['offline_mode']
+    volume = int(values['volume'])  # Convert to integer for compatibility
+    user_data["volume"] = volume
+    save_user_data()
 
-        # Play song in a new thread
-        threading.Thread(target=play_song, args=(next_song, user_data["volume"]), daemon=True).start()
+    loop_count = 0  # Reset loop count when playing a new song
+    window['loop_count'].update(f"Looped {loop_count} times")  # Reset loop count display
 
-        if auto_stream:  # Auto-queue next song if auto-streaming is active
-            threading.Thread(target=check_and_autostream, daemon=True).start()
+    if song_name:
+        print(f"Searching for {song_name}...")
+        video_url = search_song(song_name)
+
+        if video_url:
+            print(f"Playing: {video_url}")
+            # Play song in a new thread, avoiding blocking the GUI
+            threading.Thread(target=play_song, args=(video_url, volume, offline_mode), daemon=True).start()
+        else:
+            print("Song not found, please try again.")
 
 # Stop playback
 def stop_playback():
@@ -117,51 +141,27 @@ def stop_playback():
     subprocess.run(['pkill', 'mpv'])
     logging.info("Playback stopped.")
 
-# Handle play button
-def handle_play(values):
-    global loop_song
-    song_name = values['song_input']
-    offline_mode = values['offline_mode']
-    volume = values['volume']
-    user_data["volume"] = volume
-    save_user_data()
-
-    if song_name:
-        print(f"Searching for {song_name}...")
-        video_url = search_song(song_name)
-
-        if video_url:
-            print(f"Playing: {video_url}")
-            playlist.insert(0, video_url)  # Play immediately
-            user_data["playlist"] = playlist
-            save_user_data()
-
-            # Play song in a new thread, avoiding blocking the GUI
-            threading.Thread(target=play_song, args=(video_url, volume, offline_mode), daemon=True).start()
-        else:
-            print("Song not found, please try again.")
-
 # GUI management
 def create_gui():
     load_user_data()
-    sg.theme(user_data.get("theme", "DarkAmber"))
-    
+    sg.theme('SystemDefault')
+
     layout = [
+        [sg.Text(COFO_ASCII, font=("Courier", 14), justification='center')],
         [sg.Text('Enter the name of the song you want to play:')],
         [sg.InputText(key='song_input')],
-        [sg.Button('Play'), sg.Button('Pause'), sg.Button('Stop'), sg.Button('Next')],
+        [sg.Button('Play'), sg.Button('Pause'), sg.Button('Stop')],
         [sg.Text('Volume:'), sg.Slider(range=(0, 100), default_value=user_data.get("volume", 50), orientation='h', size=(40, 15), key='volume')],
         [sg.Checkbox('Offline Mode', key='offline_mode', default=False)],
-        [sg.Checkbox('Loop Song', key='loop_song', default=False)],  # New loop option
-        [sg.Listbox(values=user_data.get("playlist", []), size=(50, 10), key='playlist')],
-        [sg.Button('Add to Playlist'), sg.Button('Clear Playlist')],
+        [sg.Checkbox('Loop Song', key='loop_song', default=False)],  # Loop option
+        [sg.Text('Loop Count: 0', key='loop_count')],  # Text element for loop count
         [sg.Output(size=(50, 10))],
         [sg.Button('Exit'), sg.Button('Change Theme')]
     ]
 
     global window
-    window = sg.Window('Cofo Music Player', layout)
-    
+    window = sg.Window('COFO Music Player', layout)
+
     while True:
         event, values = window.read(timeout=100)
         if event in (sg.WINDOW_CLOSED, 'Exit'):
@@ -177,28 +177,8 @@ def create_gui():
         if event == 'Stop':
             stop_playback()
 
-        if event == 'Next':
-            play_next_song()
-
-        if event == 'Add to Playlist':
-            song_name = values['song_input']
-            video_url = search_song(song_name)
-            if video_url:
-                playlist.append(video_url)
-                print(f"Added {video_url} to playlist.")
-                user_data["playlist"] = playlist
-                save_user_data()
-            else:
-                print("Song not found, please try again.")
-
-        if event == 'Clear Playlist':
-            playlist.clear()
-            print("Playlist cleared.")
-            user_data["playlist"] = playlist
-            save_user_data()
-
         if event == 'Change Theme':
-            theme = sg.popup_get_text('Enter Theme (DarkAmber, LightBlue, etc.):')
+            theme = sg.popup_get_text('Enter Theme (White, Black, etc.):')
             if theme:
                 user_data["theme"] = theme
                 save_user_data()
@@ -211,6 +191,7 @@ def create_gui():
             save_user_data()
 
         # Update the loop_song variable based on checkbox
+        global loop_song
         loop_song = values['loop_song']
 
     window.close()
