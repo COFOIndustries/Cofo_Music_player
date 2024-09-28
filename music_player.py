@@ -22,7 +22,6 @@ playlist = []
 current_song = None
 is_playing = False
 loop_song = False  # New variable for looping functionality
-loop_count = 0     # New variable for counting loops
 user_data = {}
 
 # Load and save user data
@@ -75,35 +74,26 @@ def download_song(video_url):
 
 # Play song with subprocess and handle looping
 def play_song(video_url, volume, offline=False):
-    global is_playing, loop_song, loop_count
-    is_playing = True
-    loop_count = 0  # Reset the loop count each time a new song starts playing
-    
+    global is_playing, loop_song
+    is_playing = True  # Playback is active
+
     try:
-        while True:  # Keep looping if loop_song is enabled
-            logging.info(f"Starting playback: {video_url}")
+        while is_playing:  # Keep playing as long as the song is playing
             if offline:
                 file_path = download_song(video_url)
-                if file_path:
-                    process = subprocess.Popen(['mpv', '--no-video', f'--volume={volume}', file_path])
+                process = subprocess.Popen(['mpv', '--no-video', f'--volume={volume}', file_path])
             else:
                 process = subprocess.Popen(['mpv', '--no-video', f'--volume={volume}', video_url])
 
-            process.wait()  # Wait for the song to finish
-
-            if not loop_song:
-                break  # Exit loop if looping is disabled
-
-            # Increment loop count and update the loop count in the GUI
-            loop_count += 1
-            logging.info(f"Looped {loop_count} times")
-            window['loop_count'].update(f"Looped {loop_count} times")
+            process.wait()  # Wait for song to complete
+            
+            if not loop_song:  # If loop is disabled, stop replaying
+                break
 
     except Exception as e:
         logging.error(f"Error during playback: {str(e)}")
     finally:
-        is_playing = False
-        logging.info("Playback finished or stopped.")
+        is_playing = False  # Playback is no longer active when song or loop finishes
 
 # Play next song in playlist
 def play_next_song(auto_stream=False):
@@ -120,30 +110,21 @@ def play_next_song(auto_stream=False):
         if auto_stream:  # Auto-queue next song if auto-streaming is active
             threading.Thread(target=check_and_autostream, daemon=True).start()
 
-# Automatically fetch more songs if the playlist is empty
-def check_and_autostream():
-    if not playlist:
-        print("Playlist is empty. Searching for more songs to auto-play...")
-        next_search_query = "suggestion based on last played"  # Modify as needed
-        video_url = search_song(next_search_query)
-        if video_url:
-            playlist.append(video_url)
-            user_data["playlist"] = playlist
-            save_user_data()
-            window.Element('playlist').update(user_data["playlist"])  # Refresh the playlist UI
-        play_next_song(auto_stream=True)  # Loop the auto-stream
+# Stop playback
+def stop_playback():
+    global is_playing
+    is_playing = False
+    subprocess.run(['pkill', 'mpv'])
+    logging.info("Playback stopped.")
 
 # Handle play button
 def handle_play(values):
-    global loop_count
+    global loop_song
     song_name = values['song_input']
     offline_mode = values['offline_mode']
     volume = values['volume']
     user_data["volume"] = volume
     save_user_data()
-
-    loop_count = 0  # Reset loop count when playing a new song
-    window['loop_count'].update(f"Looped {loop_count} times")  # Reset loop count display
 
     if song_name:
         print(f"Searching for {song_name}...")
@@ -160,13 +141,6 @@ def handle_play(values):
         else:
             print("Song not found, please try again.")
 
-# Stop playback
-def stop_playback():
-    global is_playing
-    is_playing = False
-    subprocess.run(['pkill', 'mpv'])
-    logging.info("Playback stopped.")
-
 # GUI management
 def create_gui():
     load_user_data()
@@ -179,7 +153,6 @@ def create_gui():
         [sg.Text('Volume:'), sg.Slider(range=(0, 100), default_value=user_data.get("volume", 50), orientation='h', size=(40, 15), key='volume')],
         [sg.Checkbox('Offline Mode', key='offline_mode', default=False)],
         [sg.Checkbox('Loop Song', key='loop_song', default=False)],  # New loop option
-        [sg.Text('Loop Count: 0', key='loop_count')],  # New text element for loop count
         [sg.Listbox(values=user_data.get("playlist", []), size=(50, 10), key='playlist')],
         [sg.Button('Add to Playlist'), sg.Button('Clear Playlist')],
         [sg.Output(size=(50, 10))],
