@@ -18,20 +18,12 @@ USER_DATA_PATH = "user_data.json"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 # Initialize global variables
+playlist = []
 current_song = None
 is_playing = False
 loop_song = False
 loop_count = 0
 user_data = {}
-
-# ASCII art for COFO branding
-COFO_ASCII = r"""
-  ____    ____   ______   ______ 
- |    \  /    | /  __  \ |      \
- |  _  \/  _  ||  |  |  ||  ||  |
- |  ||  ||  || ||  |  |  ||  ||  |
- |__| \__|__|__||__|  |__||______|
-"""
 
 # Load and save user data
 def load_user_data():
@@ -42,8 +34,9 @@ def load_user_data():
     except FileNotFoundError:
         logging.warning("User data file not found, creating default settings.")
         user_data = {
-            "theme": "White",
+            "theme": "DarkAmber",
             "volume": 50,
+            "playlist": [],
             "cache": {}
         }
 
@@ -84,7 +77,8 @@ def download_song(video_url):
 def play_song(video_url, volume, offline=False):
     global is_playing, loop_song, loop_count
     is_playing = True
-
+    loop_count = 0  # Reset the loop count each time a new song starts playing
+    
     try:
         while True:  # Keep looping if loop_song is enabled
             logging.info(f"Starting playback: {video_url}")
@@ -97,13 +91,11 @@ def play_song(video_url, volume, offline=False):
 
             process.wait()  # Wait for the song to finish
 
-            # Check if looping is enabled
             if not loop_song:
                 break  # Exit loop if looping is disabled
 
-            loop_count += 1
+            loop_count += 1  # Increment loop count
             logging.info(f"Looped {loop_count} times")
-            window['loop_count'].update(f"Looped {loop_count} times")
 
     except Exception as e:
         logging.error(f"Error during playback: {str(e)}")
@@ -116,19 +108,21 @@ def handle_play(values):
     global loop_count
     song_name = values['song_input']
     offline_mode = values['offline_mode']
-    volume = int(values['volume'])  # Convert to integer for compatibility
+    volume = values['volume']
     user_data["volume"] = volume
     save_user_data()
 
     loop_count = 0  # Reset loop count when playing a new song
-    window['loop_count'].update(f"Looped {loop_count} times")  # Reset loop count display
-
     if song_name:
         print(f"Searching for {song_name}...")
         video_url = search_song(song_name)
 
         if video_url:
             print(f"Playing: {video_url}")
+            playlist.insert(0, video_url)  # Play immediately
+            user_data["playlist"] = playlist
+            save_user_data()
+
             # Play song in a new thread, avoiding blocking the GUI
             threading.Thread(target=play_song, args=(video_url, volume, offline_mode), daemon=True).start()
         else:
@@ -144,23 +138,25 @@ def stop_playback():
 # GUI management
 def create_gui():
     load_user_data()
-    sg.theme('SystemDefault')
+    sg.theme('LightBlue')  # Set a light theme
 
     layout = [
-        [sg.Text(COFO_ASCII, font=("Courier", 14), justification='center')],
-        [sg.Text('Enter the name of the song you want to play:')],
-        [sg.InputText(key='song_input')],
-        [sg.Button('Play'), sg.Button('Pause'), sg.Button('Stop')],
-        [sg.Text('Volume:'), sg.Slider(range=(0, 100), default_value=user_data.get("volume", 50), orientation='h', size=(40, 15), key='volume')],
-        [sg.Checkbox('Offline Mode', key='offline_mode', default=False)],
-        [sg.Checkbox('Loop Song', key='loop_song', default=False)],  # Loop option
-        [sg.Text('Loop Count: 0', key='loop_count')],  # Text element for loop count
-        [sg.Output(size=(50, 10))],
-        [sg.Button('Exit'), sg.Button('Change Theme')]
+        [sg.Text(' C O F O ', font=('Akira Expanded', 24), text_color='forest green', justification='center')],
+        [sg.Text('Enter the name of the song you want to play:', font=('Akira Expanded', 12))],
+        [sg.InputText(key='song_input', size=(40, 1), font=('Akira Expanded', 12))],
+        [sg.Button('Play', button_color=('white', 'lime green'), font=('Akira Expanded', 12)),
+         sg.Button('Pause', button_color=('white', 'lime green'), font=('Akira Expanded', 12)),
+         sg.Button('Stop', button_color=('white', 'lime green'), font=('Akira Expanded', 12))],
+        [sg.Text('Volume:', font=('Akira Expanded', 12)), 
+         sg.Slider(range=(0, 100), default_value=user_data.get("volume", 50), orientation='h', size=(40, 15), key='volume')],
+        [sg.Checkbox('Offline Mode', key='offline_mode', default=False, font=('Akira Expanded', 12))],
+        [sg.Text('Loop Song:', font=('Akira Expanded', 12)), sg.Checkbox('', key='loop_song', default=False)],
+        [sg.Output(size=(50, 10), font=('Akira Expanded', 12))],
+        [sg.Button('Exit', button_color=('white', 'red'), font=('Akira Expanded', 12))]
     ]
 
     global window
-    window = sg.Window('COFO Music Player', layout)
+    window = sg.Window('Cofo Music Player', layout, background_color='#A0D8D0')  # Light pastel mint blue
 
     while True:
         event, values = window.read(timeout=100)
@@ -177,21 +173,7 @@ def create_gui():
         if event == 'Stop':
             stop_playback()
 
-        if event == 'Change Theme':
-            theme = sg.popup_get_text('Enter Theme (White, Black, etc.):')
-            if theme:
-                user_data["theme"] = theme
-                save_user_data()
-                sg.theme(theme)
-                window.close()
-                create_gui()
-
-        if event == 'volume':
-            user_data["volume"] = values['volume']
-            save_user_data()
-
         # Update the loop_song variable based on checkbox
-        global loop_song
         loop_song = values['loop_song']
 
     window.close()
